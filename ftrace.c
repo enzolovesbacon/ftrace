@@ -15,6 +15,7 @@
 #include <fcntl.h>
 #include <sys/wait.h>
 #include <sys/user.h>
+#include <sys/stat.h>
 
 #define MAX_SYMS 8192 * 2
 
