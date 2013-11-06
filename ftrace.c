@@ -153,7 +153,7 @@ int pid_read(int pid, void *dst, const void *src, size_t len)
  */
 int BuildSyms(struct handle *h)
 {
-	int i, j, k;
+	unsigned int i, j, k;
 	char *SymStrTable;
 	Elf32_Ehdr *ehdr32;
 	Elf32_Shdr *shdr32;
@@ -263,13 +263,14 @@ int BuildSyms(struct handle *h)
 
 char *getargs(struct user_regs_struct *reg, int pid, struct address_space *addrspace)
 {
-	char buf[12];
-	int i, c = 0, in_ptr_range = 0, b;
+	unsigned char buf[12];
+	int i, c = 0, in_ptr_range = 0;
 	char *args[12], *p;
 	char tmp[64];
 	long val;
 	char *string = (char *)HeapAlloc(MAXSTR);
 	unsigned int maxstr = MAXSTR;
+	unsigned int b;
 
 	/* x86_64 supported only at this point--
 	 * We are essentially parsing this
