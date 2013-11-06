@@ -25,6 +25,7 @@
 #define FTRACE_ENV "FTRACE_ARCH"
 
 #define MAX_ADDR_SPACE 256 
+#define MAXSTR 512
 
 #define TEXT_SPACE  0
 #define DATA_SPACE  1
@@ -262,12 +263,12 @@ int BuildSyms(struct handle *h)
 char *getargs(struct user_regs_struct *reg, int pid, struct address_space *addrspace)
 {
 	char buf[12];
-	int i, c = 0, in_ptr_range = 0;
+	int i, c = 0, in_ptr_range = 0, b;
 	char *args[12], *p;
 	char tmp[64];
 	long val;
-	char *string = (char *)HeapAlloc(512);
-
+	char *string = (char *)HeapAlloc(MAXSTR);
+	unsigned int maxstr = MAXSTR;
 
 	/* x86_64 supported only at this point--
 	 * We are essentially parsing this
@@ -485,23 +486,42 @@ char *getargs(struct user_regs_struct *reg, int pid, struct address_space *addrs
 		}
 	}
 
-	/*
-	 * XXX potential buffer overflow with strcpy/strcat
-	 */
 	if (c == 0)
 		return NULL;
+	b = 0;
 	string[0] = '(';
-	strcpy((char *)&string[1], args[0]);
-	strcat(string, ",");
-	
+	b++;
+	strncpy((char *)&string[1], args[0], maxstr - b - 1);
+	b += strlen(args[0]);
+	if (b > maxstr) {
+		string = realloc((char *)string, maxstr + b + 1);
+		maxstr += b + 1;
+	}	
+	strncat(string, ",", maxstr - b);
+	b++;
 	for (i = 1; i < c; i++) {
-		strcat(string, args[i]);
-		strcat(string, ",");
+		if (b > maxstr) {
+			string = realloc((char *)string, maxstr + b + 1);
+                	maxstr += b + 1;
+        	}
+		strncat(string, args[i], maxstr - b);	
+		b += strlen(args[i]);
+		if (b > maxstr) {
+			string = realloc((char *)string, maxstr + b + 1);
+			maxstr += b + 1;
+		}
+		strncat(string, ",", maxstr - b);
+		b++;
 	}
-		
-	if ((p = strrchr(string, ','))) 
+	if ((p = strrchr(string, ',')))
 		*p = '\0';
-	strcat(string, ")");
+	if (b > maxstr) {
+		string = realloc((char *)string, maxstr + b + 1);
+                maxstr += b + 1;
+        }
+	strncat(string, ")", maxstr - b);
+	*(string + (maxstr - 1)) = '\0';
+	
 	return string;
 
 }
