@@ -115,7 +115,7 @@ void * HeapAlloc(unsigned int len)
 
 char * xstrdup(char *s)
 {
-	char *p = malloc(strlen(s) + 1);
+	char *p = (char *)HeapAlloc(strlen(s) + 1);
 	strcpy(p, s);
 	return p;
 }
