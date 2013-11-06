@@ -21,7 +21,7 @@ USAGE:
 
 ftrace [-p <pid>] [-tve] <prog> <args>
 
-ARCHITECTURE: For 32bit executables set ARCH_FTRACE=32, it defaults to 64.
+ARCHITECTURE: For 32bit executables set FTRACE_ARCH=32, it defaults to 64.
 
 
 OPTIONS: 
