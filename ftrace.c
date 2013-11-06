@@ -864,6 +864,7 @@ int main(int argc, char **argv, char **envp)
         sigaddset (&set, SIGINT);
 
 	if (argc < 2) {
+usage:
 		printf("Usage: %s [-p <pid>] [-tve] <prog>\n", argv[0]);
 		printf("[-p] Trace by PID\n");
 		printf("[-t] Type detection of function args\n");
@@ -873,6 +874,9 @@ int main(int argc, char **argv, char **envp)
 		exit(0);
 	}
 	
+	if (argc == 2 && argv[1][0] == '-')
+		goto usage;
+
 	memset(&opts, 0, sizeof(opts));
 	
 	opts.arch = 64; // default
@@ -916,7 +920,7 @@ int main(int argc, char **argv, char **envp)
 	if (skip_getopt)
 		goto begin;
 
-	while ((opt = getopt(argc, argv, "tvep:")) != -1) {
+	while ((opt = getopt(argc, argv, "htvep:")) != -1) {
 		switch(opt) {
 			case 'v':
 				opts.verbose++;
@@ -931,6 +935,11 @@ int main(int argc, char **argv, char **envp)
 				opts.attach++;
 				handle.pid = atoi(optarg);
 				break;
+			case 'h':
+				goto usage;
+			default:
+				printf("Unknown option\n");
+				exit(0);
 		}
 	} 
 	
