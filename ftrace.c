@@ -761,7 +761,8 @@ char * get_path(int pid)
 		exit(-1);
 	}
 	
-	fgets(buf, sizeof(buf), fd);
+	if (fgets(buf, sizeof(buf), fd) == NULL)
+		return NULL;
 	p = strchr(buf, '/');
 	if (!p)
 		return NULL;
