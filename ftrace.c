@@ -108,7 +108,7 @@ void * HeapAlloc(unsigned int len)
 		perror("malloc");
 		exit(-1);
 	}
-
+	return mem;
 }
 
 char * xstrdup(char *s)
@@ -254,6 +254,8 @@ int BuildSyms(struct handle *h)
                         }
 			break;
 		}
+
+		return 0;
 
 }
 
