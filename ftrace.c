@@ -115,8 +115,11 @@ void * HeapAlloc(unsigned int len)
 
 char * xstrdup(char *s)
 {
-	char *p = (char *)HeapAlloc(strlen(s) + 1);
-	strcpy(p, s);
+	char *p = strdup(s);
+	if (p == NULL) {
+		perror("strdup");
+		exit(-1);
+	}
 	return p;
 }
 	
