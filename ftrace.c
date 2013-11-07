@@ -267,7 +267,7 @@ int BuildSyms(struct handle *h)
 char *getargs(struct user_regs_struct *reg, int pid, struct address_space *addrspace)
 {
 	unsigned char buf[12];
-	int i, c = 0, in_ptr_range = 0;
+	int i, c, in_ptr_range = 0, j;
 	char *args[256], *p;
 	char tmp[64];
 	long val;
@@ -288,7 +288,7 @@ char *getargs(struct user_regs_struct *reg, int pid, struct address_space *addrs
   	     	callq  400144 <func>
 	*/
 
-	for (in_ptr_range = 0, i = 0; i < 35; i += 5) {
+	for (c = 0, in_ptr_range = 0, i = 0; i < 35; i += 5) {
 		
 		val = reg->rip - i;
 		if (pid_read(pid, buf, (void *)val, 8) == -1) {
@@ -302,10 +302,10 @@ char *getargs(struct user_regs_struct *reg, int pid, struct address_space *addrs
 		switch((unsigned char)buf[0]) {
 			case 0xbf:
 				if (opts.typeinfo) {
-					for (i = 0; i < 4; i++) {
-						if (reg->rdi >= addrspace[i].svaddr && reg->rdi <= addrspace[i].evaddr) {
+					for (j = 0; j < 4; j++) {
+						if (reg->rdi >= addrspace[j].svaddr && reg->rdi <= addrspace[j].evaddr) {
 							in_ptr_range++;
-							switch(i) {
+							switch(j) {
 								case TEXT_SPACE:
 									sprintf(tmp, "(text_ptr *)0x%llx", reg->rdi);
 									break;
@@ -332,10 +332,10 @@ char *getargs(struct user_regs_struct *reg, int pid, struct address_space *addrs
 				break;
 			case 0xbe:
 			        if (opts.typeinfo) {
-                                        for (i = 0; i < 4; i++) {
-                                                if (reg->rsi >= addrspace[i].svaddr && reg->rsi <= addrspace[i].evaddr) {
+                                        for (j = 0; j < 4; j++) {
+                                                if (reg->rsi >= addrspace[j].svaddr && reg->rsi <= addrspace[j].evaddr) {
                                                         in_ptr_range++;
-                                                        switch(i) {
+                                                        switch(j) {
                                                                 case TEXT_SPACE:
                                                                         sprintf(tmp, "(text_ptr *)0x%llx", reg->rsi);
                                                                         break;
@@ -363,10 +363,10 @@ char *getargs(struct user_regs_struct *reg, int pid, struct address_space *addrs
 				break;
 			case 0xba:
 	                         if (opts.typeinfo) {
-                                        for (i = 0; i < 4; i++) {
-                                                if (reg->rdx >= addrspace[i].svaddr && reg->rdx <= addrspace[i].evaddr) {
+                                        for (j = 0; j < 4; j++) {
+                                                if (reg->rdx >= addrspace[j].svaddr && reg->rdx <= addrspace[j].evaddr) {
                                                         in_ptr_range++;
-                                                        switch(i) {
+                                                        switch(j) {
                                                                 case TEXT_SPACE:
                                                                         sprintf(tmp, "(text_ptr *)0x%llx", reg->rdx);
                                                                         break;
@@ -385,6 +385,7 @@ char *getargs(struct user_regs_struct *reg, int pid, struct address_space *addrs
                                         if (!in_ptr_range) {
                                                 sprintf(tmp, "0x%llx", reg->rdx);
                                         }
+					printf("Incrementing c: %d\n",c);
 					args[c++] = xstrdup(tmp);
 					break;
                                 }
@@ -394,10 +395,10 @@ char *getargs(struct user_regs_struct *reg, int pid, struct address_space *addrs
 				break;
 			case 0xb9:
                         	if (opts.typeinfo) {
-                                        for (i = 0; i < 4; i++) {
-                                                if (reg->rcx >= addrspace[i].svaddr && reg->rcx <= addrspace[i].evaddr) {
+                                        for (j = 0; j < 4; j++) {
+                                                if (reg->rcx >= addrspace[j].svaddr && reg->rcx <= addrspace[j].evaddr) {
                                                         in_ptr_range++;
-                                                        switch(i) {
+                                                        switch(j) {
                                                                 case TEXT_SPACE:
                                                                         sprintf(tmp, "(text_ptr *)0x%llx", reg->rcx);
                                                                         break;
@@ -427,10 +428,10 @@ char *getargs(struct user_regs_struct *reg, int pid, struct address_space *addrs
 				switch((unsigned char)buf[1]) {
 					case 0xb8:
 				        	if (opts.typeinfo) {
-                                        		for (i = 0; i < 4; i++) {
-                                                		if (reg->r8 >= addrspace[i].svaddr && reg->r8 <= addrspace[i].evaddr) {
+                                        		for (j = 0; j < 4; j++) {
+                                                		if (reg->r8 >= addrspace[j].svaddr && reg->r8 <= addrspace[j].evaddr) {
                                                         		in_ptr_range++;
-                                                        		switch(i) {
+                                                        		switch(j) {
                                                                 		case TEXT_SPACE:
                                                                         		sprintf(tmp, "(text_ptr *)0x%llx", reg->r8);
                                                                         		break;
@@ -458,10 +459,10 @@ char *getargs(struct user_regs_struct *reg, int pid, struct address_space *addrs
 						break;
 					case 0xb9:
 					        if (opts.typeinfo) {
-                                                        for (i = 0; i < 4; i++) {
-                                                                if (reg->r9 >= addrspace[i].svaddr && reg->r9 <= addrspace[i].evaddr) {
+                                                        for (j = 0; j < 4; j++) {
+                                                                if (reg->r9 >= addrspace[j].svaddr && reg->r9 <= addrspace[j].evaddr) {
                                                                         in_ptr_range++;
-                                                                        switch(i) {
+                                                                        switch(j) {
                                                                                 case TEXT_SPACE:
                                                                                         sprintf(tmp, "(text_ptr *)0x%llx", reg->r9);
                                                                                         break;
@@ -496,22 +497,25 @@ char *getargs(struct user_regs_struct *reg, int pid, struct address_space *addrs
 	 */
 	if (c == 0)
 		return NULL;
+	
 	for (b = 0, i = 0; i < c; i++) 
-		b += strlen(args[c]) + 1; // len + ','
+		b += strlen(args[i]) + 1; // len + ','
 	if (b > maxstr + 2) { // maxstr + 2 braces
 		string = realloc((char *)string, maxstr + (b - (maxstr + 2)) + 1);
 		maxstr += (b - maxstr) + 3;
 	}
-
-        string[0] = '(';
-        strcpy(&string[1], args[0]);
+	
+	string[0] = '(';
+        strcpy((char *)&string[1], args[0]);
         strcat(string, ",");
         
-	for (i = 1; i < c; i++) {
+        for (i = 1; i < c; i++) {
                 strcat(string, args[i]);
                 strcat(string, ",");
         }
                 
+        if ((p = strrchr(string, ','))) 
+                *p = '\0';
         strcat(string, ")");
         return string;
 
