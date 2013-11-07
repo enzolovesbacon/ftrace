@@ -69,6 +69,11 @@ UNFINISHED OPTIONS
 [-r] Unfinished
 
  
+BUGS:
+
+* Rare heap memory alignment bug, SIGBUS (In progress to fix)
+* Semi Rare EIO ptrace error (In progress to fix)
+
 FUTURE:
 
 * Add support for function arguments on 32bit

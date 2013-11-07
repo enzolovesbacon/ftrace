@@ -268,7 +268,7 @@ char *getargs(struct user_regs_struct *reg, int pid, struct address_space *addrs
 {
 	unsigned char buf[12];
 	int i, c = 0, in_ptr_range = 0;
-	char *args[12], *p;
+	char *args[256], *p;
 	char tmp[64];
 	long val;
 	char *string = (char *)HeapAlloc(MAXSTR);
@@ -292,7 +292,7 @@ char *getargs(struct user_regs_struct *reg, int pid, struct address_space *addrs
 		
 		val = reg->rip - i;
 		if (pid_read(pid, buf, (void *)val, 8) == -1) {
-			fprintf(stderr, "pid_read() failed [%d]: %s\n", pid, strerror(errno));
+			fprintf(stderr, "pid_read() failed [%d]: %s <0x%llx>\n", pid, strerror(errno), reg->rip);
 			exit(-1);
 		}
 		
@@ -499,21 +499,21 @@ char *getargs(struct user_regs_struct *reg, int pid, struct address_space *addrs
 	strncpy((char *)&string[1], args[0], maxstr - b - 1);
 	b += strlen(args[0]);
 	if (b > maxstr) {
-		string = realloc((char *)string, maxstr + b + 1);
-		maxstr += b + 1;
+		string = realloc((char *)string, maxstr + (b - maxstr) + 1);
+		maxstr += (b - maxstr) + 1;
 	}	
 	strncat(string, ",", maxstr - b);
 	b++;
 	for (i = 1; i < c; i++) {
 		if (b > maxstr) {
-			string = realloc((char *)string, maxstr + b + 1);
-                	maxstr += b + 1;
+			string = realloc((char *)string, maxstr + (b - maxstr) + 1);
+                	maxstr += (b - maxstr) + 1;
         	}
 		strncat(string, args[i], maxstr - b);	
 		b += strlen(args[i]);
 		if (b > maxstr) {
-			string = realloc((char *)string, maxstr + b + 1);
-			maxstr += b + 1;
+			string = realloc((char *)string, maxstr + (b - maxstr) + 1);
+			maxstr += (b - maxstr) + 1;
 		}
 		strncat(string, ",", maxstr - b);
 		b++;
@@ -521,11 +521,11 @@ char *getargs(struct user_regs_struct *reg, int pid, struct address_space *addrs
 	if ((p = strrchr(string, ',')))
 		*p = '\0';
 	if (b > maxstr) {
-		string = realloc((char *)string, maxstr + b + 1);
-                maxstr += b + 1;
+		string = realloc((char *)string, maxstr + (b - maxstr) + 1);
+                maxstr += (b - maxstr) + 1;
         }
 	strncat(string, ")", maxstr - b);
-	*(string + (maxstr - 1)) = '\0';
+	*((char *)(string + (maxstr - 1))) = '\0';
 	
 	return string;
 
@@ -632,7 +632,7 @@ void examine_process(struct handle *h)
 #endif
 		
 		if (pid_read(h->pid, buf, (void *)eip, 8) < 0) {
-			fprintf(stderr, "pid_read() failed: %s\n", strerror(errno));
+			fprintf(stderr, "pid_read() failed: %s <0x%lx>\n", strerror(errno), eip);
 			exit(-1);
 		}
 		
