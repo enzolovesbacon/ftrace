@@ -491,43 +491,29 @@ char *getargs(struct user_regs_struct *reg, int pid, struct address_space *addrs
 		}
 	}
 
+	/*
+	 * XXX pre-allocation for strcpy/strcat, tested with super long function name
+	 */
 	if (c == 0)
 		return NULL;
-	b = 0;
-	string[0] = '(';
-	b++;
-	strncpy((char *)&string[1], args[0], maxstr - b - 1);
-	b += strlen(args[0]);
-	if (b > maxstr) {
-		string = realloc((char *)string, maxstr + (b - maxstr) + 1);
-		maxstr += (b - maxstr) + 1;
-	}	
-	strncat(string, ",", maxstr - b);
-	b++;
-	for (i = 1; i < c; i++) {
-		if (b > maxstr) {
-			string = realloc((char *)string, maxstr + (b - maxstr) + 1);
-                	maxstr += (b - maxstr) + 1;
-        	}
-		strncat(string, args[i], maxstr - b);	
-		b += strlen(args[i]);
-		if (b > maxstr) {
-			string = realloc((char *)string, maxstr + (b - maxstr) + 1);
-			maxstr += (b - maxstr) + 1;
-		}
-		strncat(string, ",", maxstr - b);
-		b++;
+	for (b = 0, i = 0; i < c; i++) 
+		b += strlen(args[c]) + 1; // len + ','
+	if (b > maxstr + 2) { // maxstr + 2 braces
+		string = realloc((char *)string, maxstr + (b - (maxstr + 2)) + 1);
+		maxstr += (b - maxstr) + 3;
 	}
-	if ((p = strrchr(string, ',')))
-		*p = '\0';
-	if (b > maxstr) {
-		string = realloc((char *)string, maxstr + (b - maxstr) + 1);
-                maxstr += (b - maxstr) + 1;
+
+        string[0] = '(';
+        strcpy(&string[1], args[0]);
+        strcat(string, ",");
+        
+	for (i = 1; i < c; i++) {
+                strcat(string, args[i]);
+                strcat(string, ",");
         }
-	strncat(string, ")", maxstr - b);
-	*((char *)(string + (maxstr - 1))) = '\0';
-	
-	return string;
+                
+        strcat(string, ")");
+        return string;
 
 }
 
