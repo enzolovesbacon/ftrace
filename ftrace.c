@@ -385,7 +385,6 @@ char *getargs(struct user_regs_struct *reg, int pid, struct address_space *addrs
                                         if (!in_ptr_range) {
                                                 sprintf(tmp, "0x%llx", reg->rdx);
                                         }
-					printf("Incrementing c: %d\n",c);
 					args[c++] = xstrdup(tmp);
 					break;
                                 }
@@ -520,7 +519,6 @@ char *getargs(struct user_regs_struct *reg, int pid, struct address_space *addrs
         return string;
 
 }
-
 /*
  * Our main handler function to parse ELF info
  * read instructions, parse them, and print
@@ -613,7 +611,7 @@ void examine_process(struct handle *h)
 #else
 		esp = pt_reg.esp;
 		eip = pt_reg.eip;
-		eax = pt_reg.rax;
+		eax = pt_reg.eax;
 		ebx = pt_reg.ebx;
 		ecx = pt_reg.ecx;
 		edx = pt_reg.edx;
