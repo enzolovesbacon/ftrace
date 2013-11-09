@@ -196,7 +196,7 @@ int BuildSyms(struct handle *h)
 							case SHT_DYNSYM:
 								h->dsyms[h->dsc].name = xstrdup(&SymStrTable[symtab32->st_name]);
 								h->lsyms[h->lsc].value = symtab32->st_value;
-								h->lsc++;
+								h->dsc++;
 								break;
 						}
                         		}
@@ -264,6 +264,7 @@ int BuildSyms(struct handle *h)
 
 }
 
+#ifdef __x86_64__
 char *getargs(struct user_regs_struct *reg, int pid, struct address_space *addrspace)
 {
 	unsigned char buf[12];
@@ -519,6 +520,7 @@ char *getargs(struct user_regs_struct *reg, int pid, struct address_space *addrs
         return string;
 
 }
+#endif
 /*
  * Our main handler function to parse ELF info
  * read instructions, parse them, and print
@@ -533,7 +535,7 @@ void examine_process(struct handle *h)
 	uint8_t buf[8];
 	unsigned long vaddr;
 	unsigned int offset;
-	char *argstr;
+	char *argstr = NULL;
 	struct address_space *addrspace = (struct address_space *)HeapAlloc(sizeof(struct address_space) * MAX_ADDR_SPACE); 
 	
 	/*
@@ -631,9 +633,11 @@ void examine_process(struct handle *h)
 
 			for (i = 0; i < h->lsc; i++) {
 				if (vaddr == h->lsyms[i].value) {
+#ifdef __x86_64__
 					argstr = getargs(&pt_reg, h->pid, addrspace);
+#endif
 					if (argstr == NULL) 
-						printf("LOCAL_call@0x%lx: %s()\n", h->lsyms[i].value, h->lsyms[i].name);
+						printf("LOCAL_call@0x%lx: %s()\n", h->lsyms[i].value, !h->lsyms[i].name?"<unknown>":h->lsyms[i].name);
 					else
 						printf("LOCAL_call@0x%lx: %s%s\n", h->lsyms[i].value, h->lsyms[i].name, argstr);
 				}
@@ -641,9 +645,11 @@ void examine_process(struct handle *h)
 			}
 			for (i = 0; i < h->dsc; i++) {
 				if (vaddr == h->dsyms[i].value) {
+#ifdef __x86_64__
 					argstr = getargs(&pt_reg, h->pid, addrspace);
+#endif
 					if (argstr == NULL)
-						printf("LOCAL_call@0x%lx: %s()\n", h->dsyms[i].value, h->dsyms[i].name);
+						printf("LOCAL_call@0x%lx: %s()\n", h->dsyms[i].value, !h->dsyms[i].name?"<unknown>":h->dsyms[i].name);
 					else
 						printf("PLT_call@0x%lx: %s%s\n", h->dsyms[i].value, h->dsyms[i].name, argstr);
 				}
