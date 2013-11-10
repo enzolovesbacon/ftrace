@@ -298,7 +298,7 @@ char *getstr(unsigned long addr, int pid)
 				string[c++] = 't';
 				continue;
 			}
-			
+
 			if (buf[j] != '\0' && isascii(buf[j]))
 				string[c++] = buf[j];
 			else
@@ -408,8 +408,9 @@ char *getargs(struct user_regs_struct *reg, int pid, struct address_space *addrs
 					}
 					if (!in_ptr_range) {
 						sprintf(tmp, "0x%llx",reg->rdi);
-					}
-					args[c++] = xstrdup(tmp);
+					}	
+					if (!s)
+						args[c++] = xstrdup(tmp);
 					break;
 				}
 				sprintf(tmp, "0x%llx", reg->rdi);
@@ -475,7 +476,8 @@ char *getargs(struct user_regs_struct *reg, int pid, struct address_space *addrs
                                         if (!in_ptr_range) {
                                                 sprintf(tmp, "0x%llx", reg->rsi);
                                         }
-					args[c++] = xstrdup(tmp);
+					if (!s)
+						args[c++] = xstrdup(tmp);
 					break;
                                 }
 
@@ -539,7 +541,8 @@ char *getargs(struct user_regs_struct *reg, int pid, struct address_space *addrs
                                         if (!in_ptr_range) {
                                                 sprintf(tmp, "0x%llx", reg->rdx);
                                         }
-					args[c++] = xstrdup(tmp);
+					if (!s)
+						args[c++] = xstrdup(tmp);
 					break;
                                 }
 
@@ -603,7 +606,8 @@ char *getargs(struct user_regs_struct *reg, int pid, struct address_space *addrs
                                         if (!in_ptr_range) {
                                                 sprintf(tmp, "0x%llx", reg->rcx);
                                         }
-					args[c++] = xstrdup(tmp);
+					if (!s)
+						args[c++] = xstrdup(tmp);
 					break;
                                 }
 
@@ -668,10 +672,11 @@ char *getargs(struct user_regs_struct *reg, int pid, struct address_space *addrs
                                         		if (!in_ptr_range) {
                                                 		sprintf(tmp, "0x%llx", reg->r8);
                                         		}
-							args[c++] = xstrdup(tmp);
+							if (!s)
+								args[c++] = xstrdup(tmp);
 							break;
                                 		}
-
+						
 						sprintf(tmp, "0x%llx", reg->r8);
 						args[c++] = xstrdup(tmp);
 						break;
@@ -731,7 +736,8 @@ char *getargs(struct user_regs_struct *reg, int pid, struct address_space *addrs
                                                         if (!in_ptr_range) {
                                                                 sprintf(tmp, "0x%llx", reg->r9);
                                                         }
-							args[c++] = xstrdup(tmp);
+							if (!s)
+								args[c++] = xstrdup(tmp);
 							break;       
                                                 }
 
@@ -1229,6 +1235,21 @@ begin:
 		if (opts.typeinfo) 
 			printf("[+] Pointer type prediction enabled\n");
 	}
+	
+	if (opts.arch == 32 && opts.typeinfo) {
+		printf("[!] Option -t may not be used on 32bit executables\n");
+		exit(0);
+	}
+	
+	if (opts.arch == 32 && opts.getstr) {
+		printf("[!] Option -s may not be used on 32bit executables\n");
+		exit(0);
+	}
+
+	if (opts.getstr && opts.typeinfo) {
+		printf("[!] Options -t and -s may not be used together\n");
+		exit(0);
+	}
 
 	/*
 	 * We are not attaching, but rather executing
@@ -1245,7 +1266,6 @@ begin:
 			perror("fork");
 			exit(-1);
 		}
-		
 		
 		if (pid == 0) {
 			if (ptrace(PTRACE_TRACEME, 0, NULL, NULL) == -1) {
