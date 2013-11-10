@@ -38,6 +38,7 @@ struct {
 	int verbose;
 	int elfinfo;
 	int typeinfo; //imm vs. ptr
+	int getstr;
 	int arch;
 } opts;
 
@@ -264,13 +265,63 @@ int BuildSyms(struct handle *h)
 
 }
 
+/*
+ * This function attempts to get an ascii string
+ * from a pointer location.
+ */
+#ifdef __x86_64__
+char *getstr(unsigned long addr, int pid)
+{	
+	int i, j, c;
+	uint8_t buf[sizeof(long)];
+	char *string = (char *)HeapAlloc(256);
+	unsigned long vaddr;
+	
+	string[0] = '"';
+	for (c = 1, i = 0; i < 256; i += sizeof(long)) {
+		vaddr = addr + i;
+
+		if (pid_read(pid, buf, (void *)vaddr, sizeof(long)) == -1) {
+			fprintf(stderr, "pid_read() failed: %s <0x%lx>\n", strerror(errno), vaddr);
+			exit(-1);
+		}
+ 
+		for (j = 0; j < 4; j++) {
+
+			if (buf[j] == '\n') {
+				string[c++] = '\\';
+				string[c++] = 'n';
+				continue;
+			}
+			if (buf[j] == '\t') {
+				string[c++] = '\\';
+				string[c++] = 't';
+				continue;
+			}
+			
+			if (buf[j] != '\0' && isascii(buf[j]))
+				string[c++] = buf[j];
+			else
+				goto out;
+		}
+	}
+	
+out:
+	string[c++] = '"';
+	string[c] = '\0';
+
+	return string;	
+
+}
+#endif
+
 #ifdef __x86_64__
 char *getargs(struct user_regs_struct *reg, int pid, struct address_space *addrspace)
 {
 	unsigned char buf[12];
 	int i, c, in_ptr_range = 0, j;
 	char *args[256], *p;
-	char tmp[64];
+	char tmp[512], *s;
 	long val;
 	char *string = (char *)HeapAlloc(MAXSTR);
 	unsigned int maxstr = MAXSTR;
@@ -302,21 +353,54 @@ char *getargs(struct user_regs_struct *reg, int pid, struct address_space *addrs
 			break;
 		switch((unsigned char)buf[0]) {
 			case 0xbf:
-				if (opts.typeinfo) {
+				if (opts.typeinfo || opts.getstr) {
 					for (j = 0; j < 4; j++) {
 						if (reg->rdi >= addrspace[j].svaddr && reg->rdi <= addrspace[j].evaddr) {
 							in_ptr_range++;
 							switch(j) {
 								case TEXT_SPACE:
+									if (opts.getstr) {
+										s = getstr((unsigned long)reg->rdi, pid);
+										if (s) {
+											snprintf(tmp, sizeof(tmp), "%s", s);
+											args[c++] = xstrdup(tmp);
+											break;
+										}
+									}
 									sprintf(tmp, "(text_ptr *)0x%llx", reg->rdi);
 									break;
 								case DATA_SPACE:
+							        	if (opts.getstr) {
+                                                                                s = getstr((unsigned long)reg->rdi, pid);
+                                                                                if (s) {
+                                                                                        snprintf(tmp, sizeof(tmp), "%s", s);
+                                                                                        args[c++] = xstrdup(tmp);
+                                                                                        break;
+                                                                                }
+                                                                        }
 									sprintf(tmp, "(data_ptr *)0x%llx", reg->rdi);
 									break;
 								case HEAP_SPACE:
+							       		if (opts.getstr) {
+                                                                                s = getstr((unsigned long)reg->rdi, pid);
+                                                                                if (s) {
+                                                                                        snprintf(tmp, sizeof(tmp), "%s", s);
+                                                                                        args[c++] = xstrdup(tmp);
+                                                                                        break;
+                                                                                }
+                                                                        }
+
 									sprintf(tmp, "(heap_ptr *)0x%llx", reg->rdi);
 									break;
 								case STACK_SPACE:
+									 if (opts.getstr) {
+                                                                                s = getstr((unsigned long)reg->rdi, pid);
+                                                                                if (s) {
+                                                                                        snprintf(tmp, sizeof(tmp), "%s", s);
+                                                                                        args[c++] = xstrdup(tmp);
+                                                                                        break;
+                                                                                }
+                                                                        }
 									sprintf(tmp, "(stack_ptr *)0x%llx", reg->rdi);
 									break;
 							}
@@ -338,15 +422,51 @@ char *getargs(struct user_regs_struct *reg, int pid, struct address_space *addrs
                                                         in_ptr_range++;
                                                         switch(j) {
                                                                 case TEXT_SPACE:
+                                                                        if (opts.getstr) {
+                                                                                s = getstr((unsigned long)reg->rsi, pid);
+                                                                                if (s) {
+                                                                                        snprintf(tmp, sizeof(tmp), "%s", s);
+                                                                                        args[c++] = xstrdup(tmp);
+                                                                                        break;
+                                                                                }
+                                                                        }
+
                                                                         sprintf(tmp, "(text_ptr *)0x%llx", reg->rsi);
                                                                         break;
                                                                 case DATA_SPACE:
+									 if (opts.getstr) {
+                                                                                s = getstr((unsigned long)reg->rsi, pid);
+                                                                                if (s) {
+                                                                                        snprintf(tmp, sizeof(tmp), "%s", s);
+                                                                                        args[c++] = xstrdup(tmp);
+                                                                                        break;
+                                                                                }
+                                                                        }
+
                                                                         sprintf(tmp, "(data_ptr *)0x%llx", reg->rsi);
                                                                         break;
                                                                 case HEAP_SPACE:
+									 if (opts.getstr) {
+                                                                                s = getstr((unsigned long)reg->rsi, pid);
+                                                                                if (s) {
+                                                                                        snprintf(tmp, sizeof(tmp), "%s", s);
+                                                                                        args[c++] = xstrdup(tmp);
+                                                                                        break;
+                                                                                }
+                                                                        }
+
                                                                         sprintf(tmp, "(heap_ptr *)0x%llx", reg->rsi);
                                                                         break;
                                                                 case STACK_SPACE:
+									 if (opts.getstr) {
+                                                                                s = getstr((unsigned long)reg->rsi, pid);
+                                                                                if (s) {
+                                                                                        snprintf(tmp, sizeof(tmp), "%s", s);
+                                                                                        args[c++] = xstrdup(tmp);
+                                                                                        break;
+                                                                                }
+                                                                        }
+
                                                                         sprintf(tmp, "(stack_ptr *)0x%llx", reg->rsi);
                                                                         break;
                                                         }
@@ -369,15 +489,48 @@ char *getargs(struct user_regs_struct *reg, int pid, struct address_space *addrs
                                                         in_ptr_range++;
                                                         switch(j) {
                                                                 case TEXT_SPACE:
+                                                                        if (opts.getstr) {
+                                                                                s = getstr((unsigned long)reg->rdx, pid);
+                                                                                if (s) {
+                                                                                        snprintf(tmp, sizeof(tmp), "%s", s);
+                                                                                        args[c++] = xstrdup(tmp);
+                                                                                        break;
+                                                                                }
+                                                                        }
+
                                                                         sprintf(tmp, "(text_ptr *)0x%llx", reg->rdx);
                                                                         break;
                                                                 case DATA_SPACE:
+							        	if (opts.getstr) {
+                                                                                s = getstr((unsigned long)reg->rdx, pid);
+                                                                                if (s) {
+                                                                                        snprintf(tmp, sizeof(tmp), "%s", s);
+                                                                                        args[c++] = xstrdup(tmp);
+                                                                                        break;
+                                                                                }
+                                                                        }
                                                                         sprintf(tmp, "(data_ptr *)0x%llx", reg->rdx);
                                                                         break;
                                                                 case HEAP_SPACE:
+			                                        	if (opts.getstr) {				
+                                                                                s = getstr((unsigned long)reg->rdx, pid);
+                                                                                if (s) {
+                                                                                        snprintf(tmp, sizeof(tmp), "%s", s);
+                                                                                        args[c++] = xstrdup(tmp);
+                                                                                        break;
+                                                                                }
+                                                                        }
                                                                         sprintf(tmp, "(heap_ptr *)0x%llx", reg->rdx);
                                                                         break;
                                                                 case STACK_SPACE:
+									if (opts.getstr) {
+                                                                                s = getstr((unsigned long)reg->rdx, pid);
+                                                                                if (s) {
+                                                                                        snprintf(tmp, sizeof(tmp), "%s", s);
+                                                                                        args[c++] = xstrdup(tmp);
+                                                                                        break;
+                                                                                }
+                                                                        }
                                                                         sprintf(tmp, "(stack_ptr *)0x%llx", reg->rdx);
                                                                         break;
                                                         }
@@ -400,15 +553,48 @@ char *getargs(struct user_regs_struct *reg, int pid, struct address_space *addrs
                                                         in_ptr_range++;
                                                         switch(j) {
                                                                 case TEXT_SPACE:
+									if (opts.getstr) {
+                                                                                s = getstr((unsigned long)reg->rcx, pid);
+                                                                                if (s) {
+                                                                                        snprintf(tmp, sizeof(tmp), "%s", s);
+                                                                                        args[c++] = xstrdup(tmp);
+                                                                                        break;
+                                                                                }
+                                                                        }
                                                                         sprintf(tmp, "(text_ptr *)0x%llx", reg->rcx);
                                                                         break;
                                                                 case DATA_SPACE:
+									if (opts.getstr) {
+                                                                                s = getstr((unsigned long)reg->rcx, pid);
+                                                                                if (s) {
+                                                                                        snprintf(tmp, sizeof(tmp), "%s", s);
+                                                                                        args[c++] = xstrdup(tmp);
+                                                                                        break;
+                                                                                }
+                                                                        }
                                                                         sprintf(tmp, "(data_ptr *)0x%llx", reg->rcx);
                                                                         break;
                                                                 case HEAP_SPACE:
+									if (opts.getstr) {
+                                                                                s = getstr((unsigned long)reg->rcx, pid);
+                                                                                if (s) {
+                                                                                        snprintf(tmp, sizeof(tmp), "%s", s);
+                                                                                        args[c++] = xstrdup(tmp);
+                                                                                        break;
+                                                                                }
+                                                                        }
                                                                         sprintf(tmp, "(heap_ptr *)0x%llx", reg->rcx);
                                                                         break;
                                                                 case STACK_SPACE:
+							        	if (opts.getstr) {
+                                                                                s = getstr((unsigned long)reg->rcx, pid);
+                                                                                if (s) {
+                                                                                        snprintf(tmp, sizeof(tmp), "%s", s);
+                                                                                        args[c++] = xstrdup(tmp);
+                                                                                        break;
+                                                                                }
+                                                                        }
+
                                                                         sprintf(tmp, "(stack_ptr *)0x%llx", reg->rcx);
                                                                         break;
                                                         }
@@ -433,15 +619,47 @@ char *getargs(struct user_regs_struct *reg, int pid, struct address_space *addrs
                                                         		in_ptr_range++;
                                                         		switch(j) {
                                                                 		case TEXT_SPACE:
+ 			                                                        	if (opts.getstr) {
+                                                                                		s = getstr((unsigned long)reg->r8, pid);
+                                                                                		if (s) {
+                                                                                        		snprintf(tmp, sizeof(tmp), "%s", s);
+                                                                                        		args[c++] = xstrdup(tmp);
+                                                                                        		break;
+                                                                                		}
+                                                                        		}
                                                                         		sprintf(tmp, "(text_ptr *)0x%llx", reg->r8);
                                                                         		break;
                                                                 		case DATA_SPACE:
+											if (opts.getstr) {
+                                                                                                s = getstr((unsigned long)reg->r8, pid);
+                                                                                                if (s) {
+                                                                                                        snprintf(tmp, sizeof(tmp), "%s", s);
+                                                                                                        args[c++] = xstrdup(tmp);
+                                                                                                        break;
+                                                                                                }
+                                                                                        }
                                                                         		sprintf(tmp, "(data_ptr *)0x%llx", reg->r8);
                                                                         		break;
                                                                 		case HEAP_SPACE:
+                                                                                        if (opts.getstr) {
+                                                                                                s = getstr((unsigned long)reg->r8, pid);
+                                                                                                if (s) {
+                                                                                                        snprintf(tmp, sizeof(tmp), "%s", s);
+                                                                                                        args[c++] = xstrdup(tmp);
+                                                                                                        break;
+                                                                                                }
+                                                                                        }
                                                                         		sprintf(tmp, "(heap_ptr *)0x%llx", reg->r8);
                                                                         		break;
                                                                 		case STACK_SPACE:
+											if (opts.getstr) {
+                                                                                                s = getstr((unsigned long)reg->r8, pid);
+                                                                                                if (s) {
+                                                                                                        snprintf(tmp, sizeof(tmp), "%s", s);
+                                                                                                        args[c++] = xstrdup(tmp);
+                                                                                                        break;
+                                                                                                }
+                                                                                        }
                                                                         		sprintf(tmp, "(stack_ptr *)0x%llx", reg->r8);
                                                                         		break;
                                                         		}
@@ -464,15 +682,47 @@ char *getargs(struct user_regs_struct *reg, int pid, struct address_space *addrs
                                                                         in_ptr_range++;
                                                                         switch(j) {
                                                                                 case TEXT_SPACE:
+											if (opts.getstr) {
+                                                                                                s = getstr((unsigned long)reg->r9, pid);
+                                                                                                if (s) {
+                                                                                                        snprintf(tmp, sizeof(tmp), "%s", s);
+                                                                                                        args[c++] = xstrdup(tmp);
+                                                                                                        break;
+                                                                                                }
+                                                                                        }
                                                                                         sprintf(tmp, "(text_ptr *)0x%llx", reg->r9);
                                                                                         break;
                                                                                 case DATA_SPACE:
+											if (opts.getstr) {
+                                                                                                s = getstr((unsigned long)reg->r9, pid);
+                                                                                                if (s) {
+                                                                                                        snprintf(tmp, sizeof(tmp), "%s", s);
+                                                                                                        args[c++] = xstrdup(tmp);
+                                                                                                        break;
+                                                                                                }
+                                                                                        }
                                                                                         sprintf(tmp, "(data_ptr *)0x%llx", reg->r9);
                                                                                         break;
                                                                                 case HEAP_SPACE:
+											  if (opts.getstr) {
+                                                                                                s = getstr((unsigned long)reg->r9, pid);
+                                                                                                if (s) {
+                                                                                                        snprintf(tmp, sizeof(tmp), "%s", s);
+                                                                                                        args[c++] = xstrdup(tmp);
+                                                                                                        break;
+                                                                                                }
+                                                                                        }
                                                                                         sprintf(tmp, "(heap_ptr *)0x%llx", reg->r9);
                                                                                         break;
                                                                                 case STACK_SPACE:
+											  if (opts.getstr) {
+                                                                                                s = getstr((unsigned long)reg->r9, pid);
+                                                                                                if (s) {
+                                                                                                        snprintf(tmp, sizeof(tmp), "%s", s);
+                                                                                                        args[c++] = xstrdup(tmp);
+                                                                                                        break;
+                                                                                                }
+                                                                                        }
                                                                                         sprintf(tmp, "(stack_ptr *)0x%llx", reg->r9);
                                                                                         break;
                                                                         }       
@@ -884,9 +1134,10 @@ int main(int argc, char **argv, char **envp)
 
 	if (argc < 2) {
 usage:
-		printf("Usage: %s [-p <pid>] [-tve] <prog>\n", argv[0]);
+		printf("Usage: %s [-p <pid>] [-stve] <prog>\n", argv[0]);
 		printf("[-p] Trace by PID\n");
 		printf("[-t] Type detection of function args\n");
+		printf("[-s] Print string values\n");
 		printf("[-r] Register values\n");
 		printf("[-v] Verbose output\n");
 		printf("[-e] Misc. ELF info. Not yet incorperated\n");
@@ -939,7 +1190,7 @@ usage:
 	if (skip_getopt)
 		goto begin;
 
-	while ((opt = getopt(argc, argv, "htvep:")) != -1) {
+	while ((opt = getopt(argc, argv, "htvep:s")) != -1) {
 		switch(opt) {
 			case 'v':
 				opts.verbose++;
@@ -953,6 +1204,9 @@ usage:
 			case 'p':
 				opts.attach++;
 				handle.pid = atoi(optarg);
+				break;
+			case 's':
+				opts.getstr++;
 				break;
 			case 'h':
 				goto usage;
