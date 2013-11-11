@@ -34,6 +34,7 @@
 #define HEAP_SPACE  3
 
 struct { 
+	int showret;
 	int attach;
 	int verbose;
 	int elfinfo;
@@ -873,6 +874,12 @@ char *getargs(struct user_regs_struct *reg, int pid, struct address_space *addrs
 
 }
 #endif
+
+int distance(unsigned long a, unsigned long b)
+{
+	return ((a > b) ? (a - b) : (b - a));
+}
+
 /*
  * Our main handler function to parse ELF info
  * read instructions, parse them, and print
@@ -881,13 +888,14 @@ char *getargs(struct user_regs_struct *reg, int pid, struct address_space *addrs
 void examine_process(struct handle *h)
 {
 	
-	int i, count, status;
+	int i, count, status, in_routine = 0; 
 	struct user_regs_struct pt_reg;
 	long esp, eax, ebx, edx, ecx, esi, edi, eip;
 	uint8_t buf[8];
 	unsigned long vaddr;
 	unsigned int offset;
 	char *argstr = NULL;
+	long ret = 0;
 	struct address_space *addrspace = (struct address_space *)HeapAlloc(sizeof(struct address_space) * MAX_ADDR_SPACE); 
 	
 	/*
@@ -989,13 +997,40 @@ void examine_process(struct handle *h)
 			exit(-1);
 		}
 		
+	if (opts.showret) {
+			if (in_routine && buf[0] == 0xc3) {
+				ret = 0;
+				/*
+			 	 * We potentially hit a ret instruction
+			 	 * ... to confirm this we single step again
+  			 	 * and see if we indeed returned out of the
+			 	 * current call frame.
+			 	 */
+				ptrace(PTRACE_SINGLESTEP, h->pid, NULL, NULL);
+				wait (&status);
+                		count++;
+				ptrace(PTRACE_GETREGS, h->pid, NULL, &pt_reg);
+#ifdef __x86_64__
+				if (distance(eip, pt_reg.rip) > 16) 
+					ret = pt_reg.rax;		
+#endif
+#ifdef __x86_32__
+				if (distance(eip, pt_reg.eip) > 16)
+					ret = pt_reg.eax;
+#endif
+				printf("[ret]: 0x%lx \n", (long)ret);
+				in_routine = 0;
+			}
+	}
 		if (buf[0] == 0xe8) {
+			
 			offset = buf[1] + (buf[2] << 8) + (buf[3] << 16) + (buf[4] << 24);
 			vaddr = eip + offset + 5; 
 			vaddr &= 0xffffffff;
 
 			for (i = 0; i < h->lsc; i++) {
 				if (vaddr == h->lsyms[i].value) {
+					in_routine = 1;
 #ifdef __x86_64__
 					argstr = getargs(&pt_reg, h->pid, addrspace);
 #endif
@@ -1008,6 +1043,7 @@ void examine_process(struct handle *h)
 			}
 			for (i = 0; i < h->dsc; i++) {
 				if (vaddr == h->dsyms[i].value) {
+					in_routine = 1;
 #ifdef __x86_64__
 					argstr = getargs(&pt_reg, h->pid, addrspace);
 #endif
@@ -1016,6 +1052,10 @@ void examine_process(struct handle *h)
 					else
 						printf("PLT_call@0x%lx: %s%s\n", h->dsyms[i].value, h->dsyms[i].name, argstr);
 				}
+			}
+			if (argstr) {
+				free(argstr);
+				argstr = NULL;
 			}
 		}
 		
@@ -1254,7 +1294,7 @@ usage:
 		printf("[-p] Trace by PID\n");
 		printf("[-t] Type detection of function args\n");
 		printf("[-s] Print string values\n");
-		printf("[-r] Register values\n");
+		printf("[-r] Show return values\n");
 		printf("[-v] Verbose output\n");
 		printf("[-e] Misc. ELF info. Not yet incorperated\n");
 		exit(0);
@@ -1306,8 +1346,11 @@ usage:
 	if (skip_getopt)
 		goto begin;
 
-	while ((opt = getopt(argc, argv, "htvep:s")) != -1) {
+	while ((opt = getopt(argc, argv, "rhtvep:s")) != -1) {
 		switch(opt) {
+			case 'r':
+				opts.showret++;
+				break;
 			case 'v':
 				opts.verbose++;
 				break;
