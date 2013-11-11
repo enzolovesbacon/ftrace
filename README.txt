@@ -19,9 +19,11 @@ gcc ftrace.c -o ftrace
 
 USAGE:
 
-ftrace [-p <pid>] [-tve] <prog> <args>
+ftrace [-p <pid>] [-tsrve] <prog> <args>
 
-ARCHITECTURE: For 32bit executables set FTRACE_ARCH=32, it defaults to 64.
+ARCHITECTURE: 
+
+For 32bit executables set FTRACE_ARCH=32, it defaults to 64.
 
 
 OPTIONS: 
@@ -30,6 +32,10 @@ OPTIONS:
 
 [-p] This option is used to attach to an existing process ID.
 
+[-s] This option will show strings as they are passed through functions (As best it knows how)
+
+[-e] This will show certain ELF info such as symbols, and lists the shared library deps.
+
 ftrace -p <pid>
 
 [-t] Type detection will guess what pointer type a function argument is, if it is a pointer.
@@ -37,15 +43,15 @@ It will detect pointers that are within the range of the text segment, data segm
 
 EXAMPLE:
 
-ftrace -t /usr/bin/whoami
-elfmaster@Ox31337:~$ ftrace -t /usr/bin/whoami
+
+elfmaster@Ox31337:~/code/ftrace/ftrace$ ./ftrace -t /usr/bin/whoami
 
 [+] Function tracing begins here:
 LOCAL_call@0x401380: __libc_start_main()
 PLT_call@0x401320: strrchr(0x2f)
-PLT_call@0x401470: __printf_chk(0x6)
-PLT_call@0x4012b0: bindtextdomain((text_ptr *)0x40448a)
-PLT_call@0x401280: textdomain((text_ptr *)0x40448a)
+PLT_call@0x401470: __printf_chk(0x6,(text_ptr *)0x404444)
+PLT_call@0x4012b0: bindtextdomain((text_ptr *)0x40448a,(text_ptr *)0x404498,(text_ptr *)0x40448a,(text_ptr *)0x404498)
+PLT_call@0x401280: textdomain((text_ptr *)0x40448a,(text_ptr *)0x40448a,0x7f6197f75b90,(text_ptr *)0x40448a)
 PLT_call@0x401300: getopt_long((text_ptr *)0x404444)
 LOCAL_call@0x401220: __errno_location()
 LOCAL_call@0x401350: geteuid()
@@ -62,17 +68,15 @@ LOCAL_call@0x4013f0: malloc()
 LOCAL_call@0x401440: realloc()
 LOCAL_call@0x401440: realloc()
 
+OPTIONS
 
-UNFINISHED OPTIONS
-
-[-e] Unfinished
 [-r] Unfinished
 
  
 BUGS:
 
-* Rare heap memory alignment bug, SIGBUS (In progress to fix)
 * Semi Rare EIO ptrace error (In progress to fix)
+* Memory leak with -s (In progress to fix)
 
 FUTURE:
 

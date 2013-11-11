@@ -382,7 +382,7 @@ char *getstr(unsigned long addr, int pid)
 			exit(-1);
 		}
  
-		for (j = 0; j < 4; j++) {
+		for (j = 0; j < sizeof(long); j++) {
 
 			if (buf[j] == '\n') {
 				string[c++] = '\\';
