@@ -85,10 +85,10 @@ struct handle {
 	struct elf64 *elf64;
 	struct syms lsyms[MAX_SYMS]; //local syms
 	struct syms dsyms[MAX_SYMS]; //dynamic syms
-	struct syms psyms[MAX_SYMS]; //plt syms
+	char *libnames[256];
 	int lsc; //lsyms count
 	int dsc; // dsyms count
-	int psc; // psyms count;
+	int lnc; //libnames count
 	int pid;
 };
 
@@ -167,7 +167,6 @@ int BuildSyms(struct handle *h)
 	Elf64_Sym  *symtab64;
 	int st_type;
 	
-	h->psc = 0;
 	h->lsc = 0;
 	h->dsc = 0;
 
@@ -263,6 +262,103 @@ int BuildSyms(struct handle *h)
 
 		return 0;
 
+}
+
+void locate_dynamic_segment(struct handle *h)
+{
+        int i;
+        
+	switch (opts.arch) {
+		case 32:
+        		h->elf32->dyn = NULL;
+        		for (i = 0; i < h->elf32->ehdr->e_phnum; i++) {
+                		if (h->elf32->phdr[i].p_type == PT_DYNAMIC) {
+                        		h->elf32->dyn = (Elf32_Dyn *)&h->map[h->elf32->phdr[i].p_offset];
+                        		break;
+                		}
+       			}				
+			break;
+		case 64:
+		  	h->elf64->dyn = NULL;
+                        for (i = 0; i < h->elf64->ehdr->e_phnum; i++) {
+                                if (h->elf64->phdr[i].p_type == PT_DYNAMIC) {
+                                        h->elf64->dyn = (Elf64_Dyn *)&h->map[h->elf64->phdr[i].p_offset];
+                                        break;
+                                }
+                        } 
+			break;
+	}
+
+}
+
+char *get_section_data(struct handle *h, const char *section_name)
+{
+	
+        char *StringTable;
+	int i;
+
+	switch (opts.arch) {
+		case 32:
+			StringTable = h->elf32->StringTable;
+			for (i = 0; i < h->elf32->ehdr->e_shnum; i++) {
+				if (!strcmp(&StringTable[h->elf32->shdr[i].sh_name], section_name)) {
+					return &h->map[h->elf32->shdr[i].sh_offset];
+				}
+			}
+			break;
+		case 64:
+		 	StringTable = h->elf64->StringTable;
+                        for (i = 0; i < h->elf64->ehdr->e_shnum; i++) {
+                                if (!strcmp(&StringTable[h->elf64->shdr[i].sh_name], section_name)) {
+                                        return &h->map[h->elf64->shdr[i].sh_offset];
+                                }
+                        }
+			break;
+	}
+	
+    return NULL;
+}
+
+char *get_dt_strtab_name(struct handle *h, int xset)
+{
+        static char *dyn_strtbl;
+
+        if (!dyn_strtbl && !(dyn_strtbl = get_section_data(h, ".dynstr"))) 
+                printf("[!] Could not locate .dynstr section\n");
+  
+        return dyn_strtbl + xset;
+}
+
+void parse_dynamic_dt_needed(struct handle *h)
+{
+        char *symstr;
+        int i, n_entries;
+	Elf32_Dyn *dyn32;
+	Elf64_Dyn *dyn64;
+
+        locate_dynamic_segment(h);
+        h->lnc = 0;
+
+	switch(opts.arch) {
+		case 32:
+        		dyn32 = h->elf32->dyn;
+        		for (i = 0; dyn32[i].d_tag != DT_NULL; i++) {
+                		if (dyn32[i].d_tag == DT_NEEDED) {
+                        		symstr = get_dt_strtab_name(h, dyn32[i].d_un.d_val);
+                        		h->libnames[h->lnc++] = (char *)xstrdup(symstr);
+                		}
+      			}
+			break;
+		case 64:
+			dyn64 = h->elf64->dyn;
+			for (i = 0; dyn64[i].d_tag != DT_NULL; i++) {
+                                if (dyn64[i].d_tag == DT_NEEDED) {
+                                        symstr = get_dt_strtab_name(h, dyn64[i].d_un.d_val);
+                                        h->libnames[h->lnc++] = (char *)xstrdup(symstr);
+                                }
+                        }
+			break;
+		}
 }
 
 /*
@@ -824,8 +920,8 @@ void examine_process(struct handle *h)
 	 */
 	get_address_space((struct address_space *)addrspace, h->pid, h->path);
 
-	if (opts.verbose) {
-		printf("[+] Printing Symbol Information!\n\n");
+	if (opts.elfinfo) {
+		printf("[+] Printing Symbol Information:\n\n");
 		for (i = 0; i < h->lsc; i++) {
 			if (h->lsyms[i].name == NULL)
 				printf("UNKNOWN: 0x%lx\n", h->lsyms[i].value);
@@ -838,13 +934,24 @@ void examine_process(struct handle *h)
 			else
 				printf("%s 0x%lx\n", h->dsyms[i].name, h->dsyms[i].value);
 		}
-		printf("[+] Printing the address space layout\n");
-		printf("0x%lx-0x%lx %s [text]\n", addrspace[TEXT_SPACE].svaddr, addrspace[TEXT_SPACE].evaddr, h->path);
-		printf("0x%lx-0x%lx %s [data]\n", addrspace[DATA_SPACE].svaddr, addrspace[DATA_SPACE].evaddr, h->path);
-		printf("0x%lx-0x%lx %s [heap]\n", addrspace[HEAP_SPACE].svaddr, addrspace[HEAP_SPACE].evaddr, h->path);
-		printf("0x%lx-0x%lx %s [stack]\n",addrspace[STACK_SPACE].svaddr, addrspace[STACK_SPACE].evaddr, h->path); 
+		
+		printf("\n[+] Printing shared library dependencies:\n\n");
+		
+		parse_dynamic_dt_needed(h);
+		for (i = 0; i < h->lnc; i++) {
+			printf("[%d]\t%s\n", i + 1, h->libnames[i]);
+		}
 	}
 	
+	if (opts.verbose ) {
+	 	printf("[+] Printing the address space layout\n");
+                printf("0x%lx-0x%lx %s [text]\n", addrspace[TEXT_SPACE].svaddr, addrspace[TEXT_SPACE].evaddr, h->path);
+                printf("0x%lx-0x%lx %s [data]\n", addrspace[DATA_SPACE].svaddr, addrspace[DATA_SPACE].evaddr, h->path);
+                printf("0x%lx-0x%lx %s [heap]\n", addrspace[HEAP_SPACE].svaddr, addrspace[HEAP_SPACE].evaddr, h->path);
+                printf("0x%lx-0x%lx %s [stack]\n",addrspace[STACK_SPACE].svaddr, addrspace[STACK_SPACE].evaddr, h->path);
+	}
+
+
 	printf("\n[+] Function tracing begins here:\n");
         for (;;) {
 
@@ -942,7 +1049,8 @@ void MapElf32(struct handle *h)
 	h->elf32->ehdr = (Elf32_Ehdr *)h->map;
 	h->elf32->shdr = (Elf32_Shdr *)(h->map + h->elf32->ehdr->e_shoff);
 	h->elf32->phdr = (Elf32_Phdr *)(h->map + h->elf32->ehdr->e_phoff);
-
+	
+	h->elf32->StringTable = (char *)&h->map[h->elf32->shdr[h->elf32->ehdr->e_shstrndx].sh_offset];
 }
 
 /*
@@ -1112,6 +1220,8 @@ void MapElf64(struct handle *h)
         h->elf64->ehdr = (Elf64_Ehdr *)h->map;
         h->elf64->shdr = (Elf64_Shdr *)(h->map + h->elf64->ehdr->e_shoff);
         h->elf64->phdr = (Elf64_Phdr *)(h->map + h->elf64->ehdr->e_phoff);
+
+        h->elf64->StringTable = (char *)&h->map[h->elf64->shdr[h->elf64->ehdr->e_shstrndx].sh_offset];
 
 
 }
