@@ -10,7 +10,9 @@ and attempts to retrieve the function arguments and determine whether they are
 immediate or pointer type. As of version 0.1, function arguments are only shown
 for 64bit executables. This program is useful when wanting to see the function flow of
 a given executable during runtime without having to set incremental breakpoints
-and backtraces in a debugger like gdb.
+and backtraces in a debugger like gdb. Ftrace relies on symbols for seeing a functions
+actual name, but the -S option will show function calls for functions without
+symbols as well, displaying them as sub_<addr>. 
 
 
 COMPILE:
@@ -19,7 +21,7 @@ gcc ftrace.c -o ftrace
 
 USAGE:
 
-ftrace [-p <pid>] [-tsrve] <prog> <args>
+ftrace [-p <pid>] [-Stsve] <prog> <args>
 
 ARCHITECTURE: 
 
@@ -80,6 +82,9 @@ FUTURE:
 * Add support for function arguments on 32bit
 * Add support for following fork'd children of target process
 * Extend heuristics of 64bit procedure prologue calling convention for function args.
+* Add support for showing return value
+* Add function depth tracking for callgraph
+* Add dwarf2 support for .debug section to get function prototype info
 * Port to FreeBSD
 
 

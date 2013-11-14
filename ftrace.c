@@ -35,6 +35,8 @@
 #define HEAP_SPACE  3
 
 struct { 
+	int stripped;
+	int callsite;
 	int showret;
 	int attach;
 	int verbose;
@@ -889,6 +891,7 @@ int distance(unsigned long a, unsigned long b)
 void examine_process(struct handle *h)
 {
 	
+	int symmatch = 0;
 	int i, count, status, in_routine = 0; 
 	struct user_regs_struct pt_reg;
 	long esp, eax, ebx, edx, ecx, esi, edi, eip;
@@ -1014,7 +1017,7 @@ void examine_process(struct handle *h)
 						printf("LOCAL_call@0x%lx: %s()\n", h->lsyms[i].value, !h->lsyms[i].name?"<unknown>":h->lsyms[i].name);
 					else
 						printf("LOCAL_call@0x%lx: %s%s\n", h->lsyms[i].value, h->lsyms[i].name, argstr);
-					
+					symmatch = 1;
 				}
 				
 			}
@@ -1027,12 +1030,29 @@ void examine_process(struct handle *h)
 						printf("LOCAL_call@0x%lx: %s()\n", h->dsyms[i].value, !h->dsyms[i].name?"<unknown>":h->dsyms[i].name);
 					else
 						printf("PLT_call@0x%lx: %s%s\n", h->dsyms[i].value, h->dsyms[i].name, argstr);
+					symmatch = 1;
 				}
 			}
+			
+			if (opts.stripped) {
+				if (symmatch) {
+					symmatch = 0;
+				} else {
+					argstr = getargs(&pt_reg, h->pid, addrspace);
+				
+					if (argstr == NULL)
+						printf("LOCAL_call@0x%lx: sub_%lx()\n", vaddr, vaddr);
+					else
+						printf("LOCAL_call@0x%lx: sub_%lx%s\n", vaddr, vaddr, argstr);
+				}
+			}
+
 			if (argstr) {
 				free(argstr);
 				argstr = NULL;
 			}
+
+ 
 		}
 		
 				
@@ -1266,13 +1286,14 @@ int main(int argc, char **argv, char **envp)
 
 	if (argc < 2) {
 usage:
-		printf("Usage: %s [-p <pid>] [-stve] <prog>\n", argv[0]);
+		printf("Usage: %s [-p <pid>] [-Sstve] <prog>\n", argv[0]);
 		printf("[-p] Trace by PID\n");
 		printf("[-t] Type detection of function args\n");
 		printf("[-s] Print string values\n");
 	//	printf("[-r] Show return values\n");
 		printf("[-v] Verbose output\n");
 		printf("[-e] Misc. ELF info. Not yet incorperated\n");
+		printf("[-S] Show function calls with stripped symbols\n");
 		exit(0);
 	}
 	
@@ -1322,8 +1343,11 @@ usage:
 	if (skip_getopt)
 		goto begin;
 
-	while ((opt = getopt(argc, argv, "rhtvep:s")) != -1) {
+	while ((opt = getopt(argc, argv, "Srhtvep:s")) != -1) {
 		switch(opt) {
+			case 'S':
+				opts.stripped++;
+				break;
 			case 'r':
 				opts.showret++;
 				break;
