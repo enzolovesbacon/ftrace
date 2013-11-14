@@ -1038,7 +1038,9 @@ void examine_process(struct handle *h)
 				if (symmatch) {
 					symmatch = 0;
 				} else {
+#ifdef __x86_64__
 					argstr = getargs(&pt_reg, h->pid, addrspace);
+#endif
 				
 					if (argstr == NULL)
 						printf("LOCAL_call@0x%lx: sub_%lx()\n", vaddr, vaddr);
