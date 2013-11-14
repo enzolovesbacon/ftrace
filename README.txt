@@ -38,10 +38,10 @@ OPTIONS:
 
 [-e] This will show certain ELF info such as symbols, and lists the shared library deps.
 
-[-r] This will show the return value (Heuristics don't work 100%)
-
 [-t] Type detection will guess what pointer type a function argument is, if it is a pointer.
 It will detect pointers that are within the range of the text segment, data segment, heap and the stack.
+
+[-S] Show function calls that don't have a matching symbol (For stripped binaries)
 
 EXAMPLE:
 
