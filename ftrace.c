@@ -4,6 +4,7 @@
  */
 
 #include <stdio.h>
+#include <ctype.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include <string.h>
@@ -292,7 +293,7 @@ void locate_dynamic_segment(struct handle *h)
 
 }
 
-char *get_section_data(struct handle *h, const char *section_name)
+uint8_t *get_section_data(struct handle *h, const char *section_name)
 {
 	
         char *StringTable;
@@ -896,8 +897,9 @@ void examine_process(struct handle *h)
 	unsigned int offset;
 	char *argstr = NULL;
 	long ret = 0;
+	unsigned long retaddr, cip;
 	struct address_space *addrspace = (struct address_space *)HeapAlloc(sizeof(struct address_space) * MAX_ADDR_SPACE); 
-	
+		
 	/*
 	 * Allocate ELF structure for
 	 * specified Arch, and map in 
@@ -997,31 +999,6 @@ void examine_process(struct handle *h)
 			exit(-1);
 		}
 		
-	if (opts.showret) {
-			if (in_routine && buf[0] == 0xc3) {
-				ret = 0;
-				/*
-			 	 * We potentially hit a ret instruction
-			 	 * ... to confirm this we single step again
-  			 	 * and see if we indeed returned out of the
-			 	 * current call frame.
-			 	 */
-				ptrace(PTRACE_SINGLESTEP, h->pid, NULL, NULL);
-				wait (&status);
-                		count++;
-				ptrace(PTRACE_GETREGS, h->pid, NULL, &pt_reg);
-#ifdef __x86_64__
-				if (distance(eip, pt_reg.rip) > 16) 
-					ret = pt_reg.rax;		
-#endif
-#ifdef __x86_32__
-				if (distance(eip, pt_reg.eip) > 16)
-					ret = pt_reg.eax;
-#endif
-				printf("[ret]: 0x%lx \n", (long)ret);
-				in_routine = 0;
-			}
-	}
 		if (buf[0] == 0xe8) {
 			
 			offset = buf[1] + (buf[2] << 8) + (buf[3] << 16) + (buf[4] << 24);
@@ -1030,7 +1007,6 @@ void examine_process(struct handle *h)
 
 			for (i = 0; i < h->lsc; i++) {
 				if (vaddr == h->lsyms[i].value) {
-					in_routine = 1;
 #ifdef __x86_64__
 					argstr = getargs(&pt_reg, h->pid, addrspace);
 #endif
@@ -1038,12 +1014,12 @@ void examine_process(struct handle *h)
 						printf("LOCAL_call@0x%lx: %s()\n", h->lsyms[i].value, !h->lsyms[i].name?"<unknown>":h->lsyms[i].name);
 					else
 						printf("LOCAL_call@0x%lx: %s%s\n", h->lsyms[i].value, h->lsyms[i].name, argstr);
+					
 				}
 				
 			}
 			for (i = 0; i < h->dsc; i++) {
 				if (vaddr == h->dsyms[i].value) {
-					in_routine = 1;
 #ifdef __x86_64__
 					argstr = getargs(&pt_reg, h->pid, addrspace);
 #endif
@@ -1294,7 +1270,7 @@ usage:
 		printf("[-p] Trace by PID\n");
 		printf("[-t] Type detection of function args\n");
 		printf("[-s] Print string values\n");
-		printf("[-r] Show return values\n");
+	//	printf("[-r] Show return values\n");
 		printf("[-v] Verbose output\n");
 		printf("[-e] Misc. ELF info. Not yet incorperated\n");
 		exit(0);
