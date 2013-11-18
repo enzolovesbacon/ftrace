@@ -94,8 +94,6 @@ FUTURE:
 * Add support for function arguments on 32bit
 * Add support for following fork'd children of target process
 * Extend heuristics of 64bit procedure prologue calling convention for function args.
-* Add support for showing return value
-* Add function depth tracking for callgraph
 * Add dwarf2 support for .debug section to get function prototype info
 * Port to FreeBSD
 
