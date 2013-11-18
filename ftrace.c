@@ -17,6 +17,18 @@
 #include <sys/wait.h>
 #include <sys/user.h>
 #include <sys/stat.h>
+#include <sys/reg.h>
+#include <stdarg.h>
+
+
+/*
+ * For our color coding output
+ */
+#define WHITE "\x1B[37m"
+#define RED  "\x1B[31m"
+#define GREEN  "\x1B[32m"
+#define YELLOW  "\x1B[33m"
+#define DEFAULT_COLOR  "\x1B[0m"
 
 #define MAX_SYMS 8192 * 2
 
@@ -34,6 +46,38 @@
 #define STACK_SPACE 2
 #define HEAP_SPACE  3
 
+#define CALLSTACK_DEPTH 0xf4240
+
+
+struct branch_instr {
+	char *mnemonic;
+	uint8_t opcode;
+};
+
+	
+#define BRANCH_INSTR_LEN_MAX 5
+
+/*
+ * Table for (non-call) branch instructions used 
+ * in our control flow analysis.
+ */
+struct branch_instr branch_table[64] = {
+			{"jo",  0x70}, 
+			{"jno", 0x71},  {"jb", 0x72},  {"jnae", 0x72},  {"jc", 0x72},  {"jnb", 0x73},
+			{"jae", 0x73},  {"jnc", 0x73}, {"jz", 0x74},    {"je", 0x74},  {"jnz", 0x75},
+			{"jne", 0x75},  {"jbe", 0x76}, {"jna", 0x76},   {"jnbe", 0x77}, {"ja", 0x77},
+			{"js",  0x78},  {"jns", 0x79}, {"jp", 0x7a},	{"jpe", 0x7a}, {"jnp", 0x7b},
+			{"jpo", 0x7b},  {"jl", 0x7c},  {"jnge", 0x7c},  {"jnl", 0x7d}, {"jge", 0x7d},
+			{"jle", 0x7e},  {"jng", 0x7e}, {"jnle", 0x7f},  {"jg", 0x7f},  {"jmp", 0xeb},
+			{"jmp", 0xe9},  {"jmpf", 0xea}, {NULL, 0}
+		};
+
+struct elf_section_range {
+	char *sh_name;
+	unsigned long sh_addr;
+	unsigned int sh_size;
+};
+
 struct { 
 	int stripped;
 	int callsite;
@@ -44,6 +88,7 @@ struct {
 	int typeinfo; //imm vs. ptr
 	int getstr;
 	int arch;
+	int cflow;
 } opts;
 
 struct elf64 {
@@ -81,26 +126,172 @@ struct syms {
 	unsigned long value;
 };
 
+typedef struct breakpoint {
+	unsigned long vaddr;
+	long orig_code;
+} breakpoint_t;
+
+typedef struct calldata {
+		char *symname;
+		char *string;
+		unsigned long vaddr;
+		unsigned long retaddr;
+	//	unsigned int depth;
+		breakpoint_t breakpoint;
+} calldata_t;
+
+typedef struct callstack {
+	calldata_t *calldata;
+	unsigned int depth; 
+} callstack_t;
+
+struct call_list {
+	char *callstring;
+	struct call_list *next;
+};
+
+#define MAX_SHDRS 256
+
 struct handle {
 	char *path;
 	char **args;
 	uint8_t *map;
 	struct elf32 *elf32;
 	struct elf64 *elf64;
+	struct elf_section_range sh_range[MAX_SHDRS];
 	struct syms lsyms[MAX_SYMS]; //local syms
 	struct syms dsyms[MAX_SYMS]; //dynamic syms
 	char *libnames[256];
 	int lsc; //lsyms count
 	int dsc; // dsyms count
 	int lnc; //libnames count
+	int shdr_count;
 	int pid;
 };
 
 int global_pid;
 
+void load_elf_section_range(struct handle *);
 void get_address_space(struct address_space *, int, char *);
 void MapElf32(struct handle *);
 void MapElf64(struct handle *);
+void *HeapAlloc(unsigned int);
+char *xstrdup(const char *);
+char *get_section_by_range(struct handle *, unsigned long);
+
+void set_breakpoint(callstack_t *callstack)
+{
+	int status;
+  	long orig = ptrace(PTRACE_PEEKTEXT, global_pid, callstack->calldata[callstack->depth].retaddr);
+	long trap;
+	
+	trap = (orig & ~0xff) | 0xcc;
+	if (opts.verbose)
+		printf("[+] Setting breakpoint on 0x%lx\n", callstack->calldata[callstack->depth].retaddr);
+
+	ptrace(PTRACE_POKETEXT, global_pid, callstack->calldata[callstack->depth].retaddr, trap);
+	callstack->calldata[callstack->depth].breakpoint.orig_code = orig;
+	callstack->calldata[callstack->depth].breakpoint.vaddr = callstack->calldata[callstack->depth].retaddr;
+
+}
+
+void remove_breakpoint(callstack_t *callstack)
+{
+	int status;
+	if (opts.verbose)
+		printf("[+] Removing breakpoint from 0x%lx\n", callstack->calldata[callstack->depth].retaddr);
+	
+	ptrace(PTRACE_POKETEXT, global_pid, 
+	callstack->calldata[callstack->depth].retaddr, callstack->calldata[callstack->depth].breakpoint.orig_code);
+}
+
+/*
+ * Simple array implementation of stack
+ * to keep track of function depth and return values
+ */
+
+void callstack_init(callstack_t *callstack)
+{
+	callstack->calldata = (calldata_t *)HeapAlloc(sizeof(calldata_t) * CALLSTACK_DEPTH);
+	callstack->depth = -1; // 0 is first element
+
+}
+
+void callstack_push(callstack_t *callstack, calldata_t *calldata)
+{
+	memcpy(&callstack->calldata[++callstack->depth], calldata, sizeof(calldata_t));
+	set_breakpoint(callstack);
+}
+
+calldata_t * callstack_pop(callstack_t *callstack)
+{
+	if (callstack->depth == -1) 
+		return NULL;
+	
+	remove_breakpoint(callstack);
+	return (&callstack->calldata[callstack->depth--]);
+}
+
+/* View the top of the stack without popping */
+calldata_t * callstack_peek(callstack_t *callstack)
+{
+	if (callstack->depth == -1)
+		return NULL;
+	
+	return &callstack->calldata[callstack->depth];
+
+}
+
+struct call_list * add_call_string(struct call_list **head, const char *string)
+{
+	struct call_list *tmp = (struct call_list *)HeapAlloc(sizeof(struct call_list));
+	
+	tmp->callstring = (char *)xstrdup(string);
+	tmp->next = *head; 
+	*head = tmp;
+	
+	return *head;
+
+}
+
+void clear_call_list(struct call_list **head)
+{
+	struct call_list *tmp;
+	
+	if (!head)
+		return;
+
+	while (*head != NULL) {
+		tmp = (*head)->next;
+		free (*head);
+		*head = tmp;
+	}
+}
+
+struct branch_instr * search_branch_instr(uint8_t instr)
+{
+	int i;
+	struct branch_instr *p, *ret;
+	
+	for (i = 0, p = branch_table; p->mnemonic != NULL; p++, i++) {
+		if (instr == p->opcode)
+			return p;
+	}
+	
+	return NULL;
+}
+
+void print_call_list(struct call_list **head)
+{
+	if (!head)
+		return;
+	
+	while (*head != NULL) {
+		fprintf(stdout, "%s", (*head)->callstring);
+		head = &(*head)->next;
+	}
+
+}
 
 /*
  * A couple of commonly used utility
@@ -118,7 +309,7 @@ void * HeapAlloc(unsigned int len)
 	return mem;
 }
 
-char * xstrdup(char *s)
+char * xstrdup(const char *s)
 {
 	char *p = strdup(s);
 	if (p == NULL) {
@@ -128,9 +319,24 @@ char * xstrdup(char *s)
 	return p;
 }
 	
+char * xfmtstrdup(char *fmt, ...)
+{
+	char *s, buf[512];
+	va_list va;
+        
+	va_start (va, fmt);
+	vsnprintf (buf, sizeof(buf), fmt, va);
+	s = xstrdup(buf);
+	
+	return s;
+}
+	
+
+
 /*
  * ptrace functions
  */
+
 
 int pid_read(int pid, void *dst, const void *src, size_t len)
 {
@@ -427,6 +633,7 @@ char *getargs(struct user_regs_struct *reg, int pid, struct address_space *addrs
 	unsigned int maxstr = MAXSTR;
 	unsigned int b;
 
+	
 	/* x86_64 supported only at this point--
 	 * We are essentially parsing this
 	 * calling convention here:
@@ -439,6 +646,7 @@ char *getargs(struct user_regs_struct *reg, int pid, struct address_space *addrs
  	       	mov    $0x1,%edi
   	     	callq  400144 <func>
 	*/
+	
 
 	for (c = 0, in_ptr_range = 0, i = 0; i < 35; i += 5) {
 		
@@ -891,18 +1099,25 @@ int distance(unsigned long a, unsigned long b)
 void examine_process(struct handle *h)
 {
 	
-	int symmatch = 0;
+	int symmatch = 0, cflow_change = 0;
 	int i, count, status, in_routine = 0; 
 	struct user_regs_struct pt_reg;
 	long esp, eax, ebx, edx, ecx, esi, edi, eip;
 	uint8_t buf[8];
 	unsigned long vaddr;
 	unsigned int offset;
-	char *argstr = NULL;
-	long ret = 0;
-	unsigned long retaddr, cip;
+	char *argstr = NULL, subname[255], output[512], *sh_src, *sh_dst;
+	long ret = 0, event;
+	unsigned long retaddr, cip, current_ip;
+	struct call_list *call_list = NULL;
+	struct branch_instr *branch;
 	struct address_space *addrspace = (struct address_space *)HeapAlloc(sizeof(struct address_space) * MAX_ADDR_SPACE); 
-		
+
+	callstack_t callstack;
+	calldata_t calldata;
+	calldata_t *calldp;
+
+	global_pid = h->pid;
 	/*
 	 * Allocate ELF structure for
 	 * specified Arch, and map in 
@@ -964,6 +1179,10 @@ void examine_process(struct handle *h)
                 printf("0x%lx-0x%lx %s [stack]\n",addrspace[STACK_SPACE].svaddr, addrspace[STACK_SPACE].evaddr, h->path);
 	}
 
+	/*
+	 * Initiate our call frame stack
+	 */
+	callstack_init(&callstack);
 
 	printf("\n[+] Function tracing begins here:\n");
         for (;;) {
@@ -971,12 +1190,12 @@ void examine_process(struct handle *h)
                 ptrace (PTRACE_SINGLESTEP, h->pid, NULL, NULL);
                 wait (&status);
                 count++;
-
+	//	ptrace(PTRACE_GETREGS, h->pid, NULL, &pt_reg);
+					
                 if (WIFEXITED (status))
                 	break;
-
-                ptrace (PTRACE_GETREGS, h->pid, NULL, &pt_reg);
 		
+                ptrace (PTRACE_GETREGS, h->pid, NULL, &pt_reg);
 #ifdef __x86_64__
 		esp = pt_reg.rsp;
 		eip = pt_reg.rip;
@@ -996,12 +1215,83 @@ void examine_process(struct handle *h)
 		esi = pt_reg.esi;
 		edi = pt_reg.edi;
 #endif
-		
 		if (pid_read(h->pid, buf, (void *)eip, 8) < 0) {
 			fprintf(stderr, "pid_read() failed: %s <0x%lx>\n", strerror(errno), eip);
 			exit(-1);
 		}
 		
+		
+		if (opts.cflow) {	
+			
+			/*
+			 * If eip is outside of our binary and in say a shared
+			 * object then we don't look at the control flow.
+			 */
+			if (eip < addrspace[TEXT_SPACE].svaddr || eip > addrspace[TEXT_SPACE].evaddr)
+				continue;
+			
+			if (branch = search_branch_instr(buf[0])) {
+				
+				ptrace(PTRACE_SINGLESTEP, h->pid, NULL, NULL);
+				wait(&status);
+
+				ptrace(PTRACE_GETREGS, h->pid, NULL, &pt_reg);
+#ifdef __x86_64__
+				current_ip = pt_reg.rip;
+#else
+				current_ip = pt_reg.eip;
+#endif
+				
+				if (distance(current_ip, eip) > BRANCH_INSTR_LEN_MAX) {
+					cflow_change = 1;
+					sh_src = get_section_by_range(h, eip);
+					sh_dst = get_section_by_range(h, current_ip);
+					printf("%s(CONTROL FLOW CHANGE [%s]):%s Jump from %s 0x%lx into %s 0x%lx\n", YELLOW, branch->mnemonic, WHITE,
+					!sh_src?"<unknown section>":sh_src, eip, 
+					!sh_dst?"<unknown section>":sh_src, current_ip);
+				} 
+
+				if (cflow_change) {
+					cflow_change = 0;
+					continue;
+				}
+
+			}
+		}
+
+		/*
+		 * Did we hit a breakpoint (Return address?)
+		 * if so, then we check eax to get the return
+		 * value, and pop the call data from the stack,
+		 * which will remove the breakpoint as well.
+		 */
+		if (buf[0] == 0xcc) {
+			calldp = callstack_peek(&callstack);
+                        if (calldp != NULL) {
+                                if (calldp->retaddr == eip) {
+					snprintf(output, sizeof(output), "%s(RETURN VALUE) %s%s = %lx\n", RED, WHITE, calldp->string, eax);
+					
+					/*
+					 * Pop call stack and remove the
+					 * breakpoint at its return address.
+					 */
+					fprintf(stdout, "%s", output);
+                                        calldp = callstack_pop(&callstack);
+					free(calldp->string);
+					free(calldp->symname);
+				}
+			}
+		}
+		
+		
+		/*
+		 * As we catch each immediate call
+		 * instruction, we use callstack_push()
+		 * to push the call data onto our stack
+		 * and set a breakpoint at the return
+		 * address of the function call so that we
+		 * can get the retrun value with the code above.
+		 */
 		if (buf[0] == 0xe8) {
 			
 			offset = buf[1] + (buf[2] << 8) + (buf[3] << 16) + (buf[4] << 24);
@@ -1013,10 +1303,22 @@ void examine_process(struct handle *h)
 #ifdef __x86_64__
 					argstr = getargs(&pt_reg, h->pid, addrspace);
 #endif
-					if (argstr == NULL) 
-						printf("LOCAL_call@0x%lx: %s()\n", h->lsyms[i].value, !h->lsyms[i].name?"<unknown>":h->lsyms[i].name);
+					if (argstr == NULL)
+						printf("%sLOCAL_call@0x%lx:%s%s()\n", GREEN, h->lsyms[i].value,  WHITE, !h->lsyms[i].name?"<unknown>":h->lsyms[i].name);
 					else
-						printf("LOCAL_call@0x%lx: %s%s\n", h->lsyms[i].value, h->lsyms[i].name, argstr);
+						printf("%sLOCAL_call@0x%lx:%s%s%s\n", GREEN, h->lsyms[i].value, WHITE,  h->lsyms[i].name, argstr);
+
+					calldata.symname = xstrdup(h->lsyms[i].name);
+					calldata.vaddr = h->lsyms[i].value;
+					calldata.retaddr = eip + 5;
+					if (argstr == NULL) 
+						calldata.string = xfmtstrdup("LOCAL_call@0x%lx: %s()", h->lsyms[i].value, !h->lsyms[i].name?"<unknown>":h->lsyms[i].name);
+					else
+						calldata.string = xfmtstrdup("LOCAL_call@0x%lx: %s%s", h->lsyms[i].value, h->lsyms[i].name, argstr);
+					
+					if (opts.verbose)
+						printf("Return address for %s: 0x%lx\n", calldata.symname, calldata.retaddr);
+					callstack_push(&callstack, &calldata);
 					symmatch = 1;
 				}
 				
@@ -1027,10 +1329,23 @@ void examine_process(struct handle *h)
 					argstr = getargs(&pt_reg, h->pid, addrspace);
 #endif
 					if (argstr == NULL)
-						printf("LOCAL_call@0x%lx: %s()\n", h->dsyms[i].value, !h->dsyms[i].name?"<unknown>":h->dsyms[i].name);
+                                                printf("%sPLT_call@0x%lx:%s%s()\n", GREEN, h->dsyms[i].value, WHITE, !h->dsyms[i].name?"<unknown>":h->dsyms[i].name);
+                                        else
+                                                printf("%sPLT_call@0x%lx:%s%s%s\n", GREEN, h->dsyms[i].value, WHITE, h->dsyms[i].name, argstr);
+
+
+
+					calldata.symname = xstrdup(h->dsyms[i].name);
+                                        calldata.vaddr = h->dsyms[i].value;
+                                        calldata.retaddr = eip + 5;
+					if (argstr == NULL)
+						calldata.string = xfmtstrdup("PLT_call@0x%lx: %s()", h->dsyms[i].value, !h->dsyms[i].name?"<unknown>":h->dsyms[i].name);
 					else
-						printf("PLT_call@0x%lx: %s%s\n", h->dsyms[i].value, h->dsyms[i].name, argstr);
-					symmatch = 1;
+						calldata.string = xfmtstrdup("PLT_call@0x%lx: %s%s", h->dsyms[i].value, h->dsyms[i].name, argstr);
+					if (opts.verbose)
+						printf("Return address for %s: 0x%lx\n", calldata.symname, calldata.retaddr);
+                                        callstack_push(&callstack, &calldata);
+                                        symmatch = 1;
 				}
 			}
 			
@@ -1041,11 +1356,22 @@ void examine_process(struct handle *h)
 #ifdef __x86_64__
 					argstr = getargs(&pt_reg, h->pid, addrspace);
 #endif
-				
 					if (argstr == NULL)
-						printf("LOCAL_call@0x%lx: sub_%lx()\n", vaddr, vaddr);
+						printf("%sLOCAL_call@0x%lx:%ssub_%lx()\n", GREEN, vaddr, WHITE, vaddr);
 					else
-						printf("LOCAL_call@0x%lx: sub_%lx%s\n", vaddr, vaddr, argstr);
+						printf("%sLOCAL_call@0x%lx:%ssub_%lx%s\n", GREEN, vaddr, WHITE, vaddr, argstr);
+
+					snprintf(subname, sizeof(subname) - 1, "sub_%lx%s", vaddr, argstr == NULL ? "()" : argstr);
+					calldata.symname = xstrdup(subname);
+                                        calldata.vaddr = vaddr;
+                                        calldata.retaddr = eip + 5;
+					if (argstr == NULL)
+						calldata.string = xfmtstrdup("LOCAL_call@0x%lx: sub_%lx()", vaddr, vaddr);
+					else
+						calldata.string = xfmtstrdup("LOCAL_call@0x%lx: sub_%lx%s", vaddr, vaddr, argstr);
+                                        callstack_push(&callstack, &calldata);
+                                        symmatch = 1;
+
 				}
 			}
 
@@ -1059,7 +1385,6 @@ void examine_process(struct handle *h)
 		
 				
 	}
-
 
 }
 
@@ -1089,6 +1414,9 @@ void MapElf32(struct handle *h)
 	h->elf32->phdr = (Elf32_Phdr *)(h->map + h->elf32->ehdr->e_phoff);
 	
 	h->elf32->StringTable = (char *)&h->map[h->elf32->shdr[h->elf32->ehdr->e_shstrndx].sh_offset];
+
+ 	if (h->elf32->ehdr->e_shnum > 0 && h->elf32->ehdr->e_shstrndx != SHN_UNDEF)
+                load_elf_section_range(h);
 }
 
 /*
@@ -1234,6 +1562,66 @@ int validate_em_type(char *path)
 }
 
 	
+void load_elf_section_range(struct handle *h)
+{
+	
+	Elf32_Ehdr *ehdr32;
+	Elf32_Shdr *shdr32;
+	Elf64_Ehdr *ehdr64;
+	Elf64_Shdr *shdr64;
+
+	char *StringTable;
+	int i;
+
+	h->shdr_count = 0;
+	switch(opts.arch) {
+		case 32:
+			StringTable = h->elf32->StringTable;
+			ehdr32 = h->elf32->ehdr;
+			shdr32 = h->elf32->shdr;
+			
+			for (i = 0; i < ehdr32->e_shnum; i++) {
+				h->sh_range[i].sh_name = xstrdup(&StringTable[shdr32[i].sh_name]);
+				h->sh_range[i].sh_addr = shdr32[i].sh_addr;
+				h->sh_range[i].sh_size = shdr32[i].sh_size;
+				if (h->shdr_count == MAX_SHDRS)
+					break;
+				h->shdr_count++;
+			}
+			break;
+		case 64:
+		  	StringTable = h->elf64->StringTable;
+                        ehdr64 = h->elf64->ehdr;
+                        shdr64 = h->elf64->shdr;
+
+                        for (i = 0; i < ehdr64->e_shnum; i++) {
+                                h->sh_range[i].sh_name = xstrdup(&StringTable[shdr64[i].sh_name]);
+                                h->sh_range[i].sh_addr = shdr64[i].sh_addr;
+                                h->sh_range[i].sh_size = shdr64[i].sh_size;
+				if (h->shdr_count == MAX_SHDRS)
+					break;
+				h->shdr_count++;
+                        }
+                        break;
+		
+	}
+	
+}
+	
+char * get_section_by_range(struct handle *h, unsigned long vaddr)
+{
+	int i;
+
+	for (i = 0; i < h->shdr_count; i++) {
+		if (vaddr >= h->sh_range[i].sh_addr && vaddr <= h->sh_range[i].sh_addr + h->sh_range[i].sh_size)
+			return h->sh_range[i].sh_name;
+	}
+	
+	return NULL;
+}
+	
+
+
 void MapElf64(struct handle *h)
 {
 	int fd;
@@ -1260,7 +1648,9 @@ void MapElf64(struct handle *h)
         h->elf64->phdr = (Elf64_Phdr *)(h->map + h->elf64->ehdr->e_phoff);
 
         h->elf64->StringTable = (char *)&h->map[h->elf64->shdr[h->elf64->ehdr->e_shstrndx].sh_offset];
-
+	
+	if (h->elf64->ehdr->e_shnum > 0 && h->elf64->ehdr->e_shstrndx != SHN_UNDEF)
+		load_elf_section_range(h);
 
 }
 void sighandle(int sig)
@@ -1294,8 +1684,9 @@ usage:
 		printf("[-s] Print string values\n");
 	//	printf("[-r] Show return values\n");
 		printf("[-v] Verbose output\n");
-		printf("[-e] Misc. ELF info. Not yet incorperated\n");
+		printf("[-e] Misc. ELF info. (Symbols,Dependencies)\n");
 		printf("[-S] Show function calls with stripped symbols\n");
+		printf("[-C] Complete control flow analysis\n");
 		exit(0);
 	}
 	
@@ -1345,7 +1736,7 @@ usage:
 	if (skip_getopt)
 		goto begin;
 
-	while ((opt = getopt(argc, argv, "Srhtvep:s")) != -1) {
+	while ((opt = getopt(argc, argv, "CSrhtvep:s")) != -1) {
 		switch(opt) {
 			case 'S':
 				opts.stripped++;
@@ -1368,6 +1759,9 @@ usage:
 				break;
 			case 's':
 				opts.getstr++;
+				break;
+			case 'C':
+				opts.cflow++;
 				break;
 			case 'h':
 				goto usage;
@@ -1427,6 +1821,7 @@ begin:
               			perror("PTRACE_TRACEME");
               			exit(-1);
 			}
+			ptrace(PTRACE_SETOPTIONS, 0, 0, PTRACE_O_TRACEEXIT);
 		  	execve(handle.path, handle.args, envp);
 			exit(0);
 		}
@@ -1457,9 +1852,11 @@ begin:
 
 	
 done:
+	printf("%s\n", WHITE);
 	ptrace(PTRACE_DETACH, handle.pid, NULL, NULL);
 	exit(0);
 
 }
 	
+
 
